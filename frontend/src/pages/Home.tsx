@@ -32,7 +32,7 @@ const Home: React.FC = () => {
                 </Link>
                 {user.role === 'mentee' && (
                   <Link
-                    to="/find-mentors"
+                    to="/mentors"
                     className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-primary-700 bg-primary-100 hover:bg-primary-200"
                   >
                     Find Mentors

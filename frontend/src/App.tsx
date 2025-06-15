@@ -1,5 +1,10 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { 
+  createBrowserRouter, 
+  RouterProvider,
+  createRoutesFromElements,
+  Route
+} from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -18,49 +23,53 @@ import MentorshipSessions from './pages/MentorshipSessions';
 // Auth context
 import PrivateRoute from './components/PrivateRoute';
 
+const router = createBrowserRouter(
+  createRoutesFromElements(
+    <Route path="/" element={<Layout />}>
+      <Route index element={<Home />} />
+      <Route path="login" element={<Login />} />
+      <Route path="register" element={<Register />} />
+      <Route
+        path="profile"
+        element={
+          <PrivateRoute>
+            <Profile />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="mentors"
+        element={
+          <PrivateRoute>
+            <MentorSearch />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="requests"
+        element={
+          <PrivateRoute>
+            <MentorshipRequests />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="sessions"
+        element={
+          <PrivateRoute>
+            <MentorshipSessions />
+          </PrivateRoute>
+        }
+      />
+    </Route>
+  )
+);
+
 function App() {
   return (
     <>
-      <ToastContainer position="top-right" />
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Home />} />
-          <Route path="login" element={<Login />} />
-          <Route path="register" element={<Register />} />
-          <Route
-            path="profile"
-            element={
-              <PrivateRoute>
-                <Profile />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="mentors"
-            element={
-              <PrivateRoute>
-                <MentorSearch />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="requests"
-            element={
-              <PrivateRoute>
-                <MentorshipRequests />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="sessions"
-            element={
-              <PrivateRoute>
-                <MentorshipSessions />
-              </PrivateRoute>
-            }
-          />
-        </Route>
-      </Routes>
+      <RouterProvider router={router} />
+      <ToastContainer position="top-right" autoClose={3000} />
     </>
   );
 }

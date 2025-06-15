@@ -126,12 +126,41 @@ export const getProfile = async (
       [userId]
     );
 
+    // Get average rating
+    const [avgRatingResult] = await pool.execute<RowDataPacket[]>(
+      `SELECT AVG(r.rating) as averageRating
+       FROM ratings r
+       WHERE r.rated_id = ?`,
+      [userId]
+    );
+    const averageRating = (avgRatingResult[0] as any)?.averageRating || null;
+
+    // Get individual reviews
+    const [reviews] = await pool.execute<RowDataPacket[]>(
+      `SELECT r.id, r.session_id, r.rater_id, u.name AS rater_name, r.rating, r.comment, r.created_at
+       FROM ratings r
+       JOIN users u ON r.rater_id = u.id
+       WHERE r.rated_id = ?
+       ORDER BY r.created_at DESC`,
+      [userId]
+    );
+
     res.json({
       status: 'success',
       data: {
         profile: {
           ...profile,
-          skills: Array.isArray(skills) ? skills : []
+          skills: Array.isArray(skills) ? skills : [],
+          averageRating: averageRating ? parseFloat(averageRating).toFixed(1) : null,
+          reviews: Array.isArray(reviews) ? reviews.map(review => ({
+            id: review.id,
+            sessionId: review.session_id,
+            raterId: review.rater_id,
+            raterName: review.rater_name,
+            rating: review.rating,
+            comment: review.comment,
+            createdAt: review.created_at,
+          })) : [],
         }
       }
     });

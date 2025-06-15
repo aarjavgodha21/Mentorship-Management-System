@@ -22,32 +22,55 @@ export const authenticate = async (
 ) => {
   try {
     console.log('Auth Middleware: Entering authentication middleware', req.method, req.path);
+    
     // Get token from header
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
+    if (!authHeader) {
+      console.log('Auth Middleware: No authorization header present');
       throw new AppError('No token provided', 401);
     }
 
+    if (!authHeader.startsWith('Bearer ')) {
+      console.log('Auth Middleware: Invalid authorization header format');
+      throw new AppError('Invalid token format', 401);
+    }
+
     const token = authHeader.split(' ')[1];
-    console.log('Auth Middleware: Token received', token);
+    if (!token) {
+      console.log('Auth Middleware: No token found in authorization header');
+      throw new AppError('No token provided', 401);
+    }
+
+    console.log('Auth Middleware: Token received');
 
     // Verify token
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || 'your-secret-key'
-    ) as JwtPayload;
-    console.log('Auth Middleware: Decoded token', decoded);
-
-    // Add user to request
-    req.user = decoded;
-    next();
+    try {
+      const decoded = jwt.verify(
+        token,
+        process.env.JWT_SECRET || 'your-secret-key'
+      ) as JwtPayload;
+      
+      console.log('Auth Middleware: Token verified successfully');
+      
+      // Add user to request
+      req.user = decoded;
+      next();
+    } catch (jwtError) {
+      console.error('Auth Middleware: JWT Verification Error', jwtError);
+      if (jwtError instanceof jwt.TokenExpiredError) {
+        throw new AppError('Token expired', 401);
+      } else if (jwtError instanceof jwt.JsonWebTokenError) {
+        throw new AppError('Invalid token', 401);
+      } else {
+        throw new AppError('Authentication failed', 401);
+      }
+    }
   } catch (error) {
-    if (error instanceof jwt.JsonWebTokenError) {
-      console.error('Auth Middleware: JWT Verification Error', error.message);
-      next(new AppError('Invalid token', 401));
-    } else {
-      console.error('Auth Middleware: Generic authentication error', error);
+    console.error('Auth Middleware: Error in authentication', error);
+    if (error instanceof AppError) {
       next(error);
+    } else {
+      next(new AppError('Authentication failed', 401));
     }
   }
 }; 

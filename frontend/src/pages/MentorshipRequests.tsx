@@ -1,49 +1,114 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import axios from 'axios';
+import api from '../api/axios';
 import { toast } from 'react-toastify';
-
-interface MentorshipRequest {
-  id: number;
-  mentorId: number;
-  menteeId: number;
-  status: 'pending' | 'accepted' | 'rejected';
-  createdAt: string;
-  mentor: {
-    id: number;
-    name: string;
-    skills: string;
-  };
-  mentee: {
-    id: number;
-    name: string;
-  };
-}
+import MentorSelection from '../components/MentorSelection';
+import { MentorshipRequest, Mentor } from '../types';
 
 const MentorshipRequests: React.FC = () => {
   const { user } = useAuth();
   const [requests, setRequests] = useState<MentorshipRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [selectedMentorForScheduling, setSelectedMentorForScheduling] = useState<Mentor | null>(null);
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log('MentorshipRequests: Component mounted, user:', user);
     fetchRequests();
-  }, []);
+  }, [user]);
 
   const fetchRequests = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/mentorship/requests');
-      setRequests(response.data.data.requests);
-    } catch (error) {
-      console.error('Error fetching requests:', error);
+      console.log('MentorshipRequests: Fetching requests...');
+      const response = await api.get('/mentorship/requests');
+      console.log('MentorshipRequests: Raw response:', response.data);
+      const requestsData = response.data.data.requests;
+      const formattedRequests: MentorshipRequest[] = requestsData.map((request: any) => {
+        console.log('Raw request.mentor.skills:', request.mentor.skills);
+        console.log('Raw request.mentor.availability:', request.mentor.availability);
+
+        let formattedMentor: Mentor | null = null;
+        if (request.mentor) {
+          let skillsArray: { name: string; proficiency_level: string }[] = [];
+          if (request.mentor.skills) {
+            if (Array.isArray(request.mentor.skills)) {
+              skillsArray = request.mentor.skills;
+            } else if (typeof request.mentor.skills === 'string') {
+              try {
+                const parsed = JSON.parse(request.mentor.skills);
+                if (Array.isArray(parsed)) {
+                  skillsArray = parsed;
+                } else {
+                  skillsArray = [{ name: request.mentor.skills, proficiency_level: "Beginner" }];
+                }
+              } catch (e) {
+                skillsArray = [{ name: request.mentor.skills, proficiency_level: "Beginner" }];
+              }
+            }
+          }
+
+          let availabilityObject: { startTime: string; endTime: string; days: string[] } | null = null;
+          if (request.mentor.availability) {
+            if (typeof request.mentor.availability === 'string') {
+              try {
+                availabilityObject = JSON.parse(request.mentor.availability);
+              } catch (e) {
+                console.warn('Failed to parse availability string:', request.mentor.availability, e);
+              }
+            } else if (typeof request.mentor.availability === 'object') {
+              availabilityObject = request.mentor.availability;
+            }
+          }
+
+          formattedMentor = {
+            id: request.mentor.id,
+            name: request.mentor.name || '',
+            skills: skillsArray,
+            availability: availabilityObject,
+            averageRating: null,
+          };
+        }
+
+        let formattedMentee = {
+          id: request.mentee.id,
+          name: request.mentee.name || '',
+        };
+        
+        return {
+          id: request.id,
+          mentorId: request.mentorId,
+          menteeId: request.menteeId,
+          status: request.status,
+          createdAt: request.createdAt,
+          mentor: formattedMentor,
+          mentee: formattedMentee,
+        };
+      });
+      console.log('MentorshipRequests: Processed requests:', formattedRequests);
+
+      // Sort requests: accepted first, then pending, then rejected
+      formattedRequests.sort((a, b) => {
+        const statusOrder: { [key: string]: number } = {
+          'accepted': 1,
+          'pending': 2,
+          'rejected': 3,
+        };
+        return statusOrder[a.status] - statusOrder[b.status];
+      });
+
+      setRequests(formattedRequests);
+    } catch (error: any) {
+      console.error('MentorshipRequests: Error fetching requests:', error.response?.data || error.message || error);
       toast.error('Failed to load mentorship requests');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAcceptRequest = async (requestId: number) => {
+  const handleAcceptRequest = async (requestId: string) => {
     try {
-      await axios.patch(`http://localhost:5000/api/mentorship/requests/${requestId}`, { status: 'accepted' });
+      await api.patch(`/mentorship/requests/${requestId}`, { status: 'accepted' });
       toast.success('Mentorship request accepted');
       fetchRequests();
     } catch (error) {
@@ -52,9 +117,9 @@ const MentorshipRequests: React.FC = () => {
     }
   };
 
-  const handleRejectRequest = async (requestId: number) => {
+  const handleRejectRequest = async (requestId: string) => {
     try {
-      await axios.patch(`http://localhost:5000/api/mentorship/requests/${requestId}`, { status: 'rejected' });
+      await api.patch(`/mentorship/requests/${requestId}`, { status: 'rejected' });
       toast.success('Mentorship request rejected');
       fetchRequests();
     } catch (error) {
@@ -63,15 +128,28 @@ const MentorshipRequests: React.FC = () => {
     }
   };
 
-  const handleCancelRequest = async (requestId: number) => {
+  const handleCancelRequest = async (requestId: string) => {
     try {
-      await axios.delete(`http://localhost:5000/api/mentorship/requests/${requestId}`);
+      await api.delete(`/mentorship/requests/${requestId}`);
       toast.success('Mentorship request cancelled');
       fetchRequests();
     } catch (error) {
       console.error('Error cancelling request:', error);
       toast.error('Failed to cancel mentorship request');
     }
+  };
+
+  const handleScheduleSession = (request: MentorshipRequest) => {
+    setSelectedMentorForScheduling(request.mentor);
+    setSelectedRequestId(request.id);
+    setShowScheduleModal(true);
+  };
+
+  const handleSessionBooked = () => {
+    setShowScheduleModal(false);
+    setSelectedMentorForScheduling(null);
+    setSelectedRequestId(null);
+    fetchRequests();
   };
 
   const getStatusBadgeColor = (status: string) => {
@@ -96,10 +174,22 @@ const MentorshipRequests: React.FC = () => {
   }
 
   const filteredRequests = requests.filter(request => {
+    console.log('MentorshipRequests: Filtering request:', {
+      request,
+      userId: user?.id,
+      userRole: user?.role,
+      requestMenteeId: request.menteeId,
+      requestMentorId: request.mentorId
+    });
+    
     if (user?.role === 'mentor') {
-      return request.mentorId === user.id;
+      const matches = request.mentorId === String(user.id);
+      console.log('MentorshipRequests: Mentor request match:', matches);
+      return matches;
     } else {
-      return request.menteeId === user?.id;
+      const matches = request.menteeId === String(user?.id);
+      console.log('MentorshipRequests: Mentee request match:', matches);
+      return matches;
     }
   });
 
@@ -126,21 +216,24 @@ const MentorshipRequests: React.FC = () => {
                         <div className="h-10 w-10 rounded-full bg-primary-100 flex items-center justify-center">
                           <span className="text-primary-600 font-medium">
                             {user?.role === 'mentor'
-                              ? request.mentee.name.charAt(0)
-                              : request.mentor.name.charAt(0)}
+                              ? (request.mentee?.name?.charAt(0) || 'U')
+                              : (request.mentor?.name?.charAt(0) || 'U')}
                           </span>
                         </div>
                       </div>
                       <div className="ml-4">
                         <h3 className="text-lg font-medium text-gray-900">
                           {user?.role === 'mentor'
-                            ? `Request from ${request.mentee.name}`
-                            : `Request to ${request.mentor.name}`}
+                            ? `Request from ${request.mentee?.name || 'Unknown Mentee'}`
+                            : `Request to ${request.mentor?.name || 'Unknown Mentor'}`}
                         </h3>
                         <div className="mt-1">
                           <span className="text-sm text-gray-500">
                             {user?.role === 'mentor'
-                              ? 'Skills: ' + request.mentor.skills
+                              ? 'Skills: ' +
+                                (request.mentor?.skills && request.mentor.skills.length > 0
+                                  ? request.mentor.skills.map(s => `${s.name} (${s.proficiency_level})`).join(', ')
+                                  : 'N/A')
                               : 'Requested on ' + new Date(request.createdAt).toLocaleDateString()}
                           </span>
                         </div>
@@ -181,6 +274,14 @@ const MentorshipRequests: React.FC = () => {
                           )}
                         </>
                       )}
+                      {request.status === 'accepted' && user?.role === 'mentee' && (
+                        <button
+                          onClick={() => handleScheduleSession(request)}
+                          className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                        >
+                          Schedule Session
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -196,6 +297,38 @@ const MentorshipRequests: React.FC = () => {
                   ? 'You have no pending mentorship requests.'
                   : 'You have not made any mentorship requests yet.'}
               </p>
+            </div>
+          )}
+
+          {showScheduleModal && selectedMentorForScheduling && selectedRequestId && (
+            <div className="fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50 flex justify-center items-center">
+              <div className="bg-white p-8 rounded-lg shadow-xl max-w-lg w-full relative">
+                <button
+                  onClick={() => setShowScheduleModal(false)}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+                <h2 className="text-2xl font-bold mb-6 text-gray-900">Schedule Session with {selectedMentorForScheduling.name}</h2>
+                <MentorSelection
+                  initialMentor={selectedMentorForScheduling}
+                  onSessionBooked={handleSessionBooked}
+                  requestId={selectedRequestId}
+                />
+              </div>
             </div>
           )}
         </div>

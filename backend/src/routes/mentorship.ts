@@ -7,7 +7,8 @@ import {
   createSession,
   getSessions,
   updateSessionStatus,
-  createRating
+  createRating,
+  deleteRequest
 } from '../controllers/mentorship';
 import { validateRequest } from '../middleware/validateRequest';
 import { authenticate } from '../middleware/auth';
@@ -39,6 +40,8 @@ router.patch(
   validateRequest,
   updateRequestStatus
 );
+
+router.delete('/requests/:requestId', authenticate, deleteRequest);
 
 // Sessions
 router.post(

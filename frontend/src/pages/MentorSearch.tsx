@@ -1,20 +1,9 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import api from '../api/axios';
 import { toast } from 'react-toastify';
 import { useAuth } from '../contexts/AuthContext';
-
-interface MentorProfile {
-  id: string;
-  userId: string;
-  firstName: string;
-  lastName: string;
-  department: string;
-  bio: string;
-  experience: string;
-  hourlyRate: number;
-  availability: any;
-  skills: { name: string; proficiency_level: string }[];
-}
+import MentorSelection from '../components/MentorSelection';
+import { MentorProfile, Session } from '../types';
 
 const MentorSearch: React.FC = () => {
   const { user } = useAuth();
@@ -26,7 +15,7 @@ const MentorSearch: React.FC = () => {
   const handleSearch = async () => {
     setLoading(true);
     try {
-      const response = await axios.get('http://localhost:5000/api/profile/search/mentors', {
+      const response = await api.get('/profile/search/mentors', {
         params: {
           skill: searchSkill,
           department: searchDepartment,
@@ -37,15 +26,16 @@ const MentorSearch: React.FC = () => {
         userId: mentor.user_id,
         firstName: mentor.first_name,
         lastName: mentor.last_name,
+        name: `${mentor.first_name} ${mentor.last_name}`,
         department: mentor.department,
         bio: mentor.bio,
         experience: mentor.experience,
         hourlyRate: mentor.hourly_rate !== null ? parseFloat(mentor.hourly_rate) : 0,
         availability: mentor.availability,
         skills: Array.isArray(mentor.skills) ? mentor.skills : [],
+        averageRating: mentor.average_rating,
       }));
       setSearchResults(formattedMentors);
-      console.log('handleSearch: Formatted mentors for state:', formattedMentors);
     } catch (error: any) {
       console.error('Error searching mentors:', error);
       toast.error(error.response?.data?.message || 'Failed to search mentors');
@@ -55,25 +45,20 @@ const MentorSearch: React.FC = () => {
     }
   };
 
-  const handleRequestMentorship = async (mentorId: string, mentorName: string) => {
-    if (!user) {
-      toast.error('Please log in to request mentorship.');
-      return;
-    }
-    if (user.role !== 'mentee') {
-      toast.error('Only mentees can request mentorship.');
-      return;
-    }
-
+  const handleSendMentorshipRequest = async (mentorId: string) => {
     try {
-      await axios.post('http://localhost:5000/api/mentorship/requests', {
-        mentorId: mentorId,
-        message: `Hello ${mentorName}, I am interested in mentorship.` // Optional message
+      setLoading(true);
+      await api.post('/mentorship/requests', {
+        mentorId,
+        message: 'I am interested in mentorship. Can we connect?', // Default message
       });
-      toast.success(`Mentorship request sent to ${mentorName}`);
+      toast.success('Mentorship request sent successfully!');
+      // Optionally, refresh search results or update UI to reflect sent request
     } catch (error: any) {
       console.error('Error sending mentorship request:', error);
       toast.error(error.response?.data?.message || 'Failed to send mentorship request');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -112,9 +97,9 @@ const MentorSearch: React.FC = () => {
                 placeholder="e.g., Computer Science"
               />
             </div>
-            {/* Additional filters like rating can be added here */}
           </div>
-          <div className="mt-6 flex justify-end">
+          
+          <div className="mt-4">
             <button
               onClick={handleSearch}
               className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
@@ -124,64 +109,79 @@ const MentorSearch: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white shadow overflow-hidden sm:rounded-md">
-          {loading ? (
-            <div className="py-12 text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 inline-block"></div>
-              <p className="mt-4 text-gray-600">Loading mentors...</p>
-            </div>
-          ) : searchResults.length > 0 ? (
+        {/* Removed immediate session booking form */}
+        {searchResults.length > 0 && !loading ? (
+          <div className="bg-white shadow overflow-hidden sm:rounded-md">
             <ul className="divide-y divide-gray-200">
               {searchResults.map((mentor) => (
                 <li key={mentor.id}>
-                  <div className="px-4 py-4 sm:px-6 flex items-center justify-between">
-                    <div className="min-w-0 flex-1 sm:flex sm:items-center sm:justify-between">
-                      <div className="truncate">
-                        <div className="flex text-sm">
-                          <p className="font-medium text-primary-600 truncate">{mentor.firstName} {mentor.lastName}</p>
-                          <p className="ml-1 flex-shrink-0 font-normal text-gray-500">@{mentor.department}</p>
-                        </div>
-                        <div className="mt-2 flex">
-                          <div className="flex items-center text-sm text-gray-500">
-                            <p className="text-gray-900 font-medium">Skills:</p> {mentor.skills.map(s => s.name).join(', ')}
+                  <div className="px-4 py-4 sm:px-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-lg font-medium text-primary-600 truncate">
+                          {mentor.firstName} {mentor.lastName}
+                        </h3>
+                        <p className="mt-1 text-sm text-gray-500">
+                          Department: {mentor.department}
+                        </p>
+                        {mentor.averageRating !== null && (
+                          <p className="mt-1 text-sm text-gray-500">
+                            Average Rating: {mentor.averageRating} / 5
+                          </p>
+                        )}
+                        <div className="mt-2">
+                          <p className="text-sm text-gray-900">Skills:</p>
+                          <div className="mt-1 flex flex-wrap gap-2">
+                            {mentor.skills.map((skill, index) => (
+                              <span
+                                key={index}
+                                className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800"
+                              >
+                                {skill.name} ({skill.proficiency_level})
+                              </span>
+                            ))}
                           </div>
                         </div>
                         {mentor.bio && (
-                          <p className="text-sm text-gray-500 mt-1">{mentor.bio}</p>
+                          <p className="mt-2 text-sm text-gray-500">{mentor.bio}</p>
                         )}
                         {mentor.experience && (
-                          <p className="text-sm text-gray-500 mt-1">Experience: {mentor.experience}</p>
+                          <p className="mt-2 text-sm text-gray-500">
+                            Experience: {mentor.experience}
+                          </p>
                         )}
                       </div>
-                    </div>
-                    <div className="ml-5 flex-shrink-0">
-                      <button
-                        onClick={() => handleRequestMentorship(mentor.userId, `${mentor.firstName} ${mentor.lastName}`)}
-                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                      >
-                        Request Mentorship
-                      </button>
+                      <div className="ml-4 flex-shrink-0">
+                        <button
+                          onClick={() => handleSendMentorshipRequest(mentor.userId)}
+                          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                        >
+                          Send Mentorship Request
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </li>
               ))}
             </ul>
-          ) : (user?.role === 'mentee' && !loading && searchResults.length === 0) ? (
-            <div className="text-center py-12">
-              <h3 className="text-lg font-medium text-gray-900">No mentors found</h3>
-              <p className="mt-2 text-sm text-gray-500">
-                Try adjusting your search filters or check back later.
-              </p>
-            </div>
-          ) : !loading && searchResults.length === 0 && user?.role === 'mentor' && (
-            <div className="text-center py-12">
-              <h3 className="text-lg font-medium text-gray-900">Mentors are for mentees!</h3>
-              <p className="mt-2 text-sm text-gray-500">
-                Switch to a mentee account to search for mentors.
-              </p>
-            </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="bg-white shadow overflow-hidden sm:rounded-md">
+            {loading ? (
+              <div className="py-12 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 inline-block"></div>
+                <p className="mt-4 text-gray-600">Loading mentors...</p>
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <h3 className="text-lg font-medium text-gray-900">No mentors found</h3>
+                <p className="mt-2 text-sm text-gray-500">
+                  Try adjusting your search filters or check back later.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

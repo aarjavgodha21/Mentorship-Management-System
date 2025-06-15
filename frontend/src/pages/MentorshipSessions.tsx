@@ -1,27 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import axios from 'axios';
+import api from '../api/axios';
 import { toast } from 'react-toastify';
-
-interface Session {
-  id: number;
-  mentorId: number;
-  menteeId: number;
-  startTime: string;
-  endTime: string;
-  status: 'scheduled' | 'completed' | 'cancelled';
-  notes: string;
-  rating?: number;
-  feedback?: string;
-  mentor: {
-    id: number;
-    name: string;
-  };
-  mentee: {
-    id: number;
-    name: string;
-  };
-}
+import { Session } from '../types';
 
 const MentorshipSessions: React.FC = () => {
   const { user } = useAuth();
@@ -37,8 +18,20 @@ const MentorshipSessions: React.FC = () => {
 
   const fetchSessions = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/mentorship/sessions');
-      setSessions(response.data.data.sessions);
+      const response = await api.get('/mentorship/sessions');
+      const sessionsData = response.data.data.sessions;
+
+      // Sort sessions: scheduled first, then completed, then cancelled
+      sessionsData.sort((a: any, b: any) => {
+        const statusOrder: { [key: string]: number } = {
+          'scheduled': 1,
+          'completed': 2,
+          'cancelled': 3,
+        };
+        return statusOrder[a.status] - statusOrder[b.status];
+      });
+
+      setSessions(sessionsData);
     } catch (error) {
       console.error('Error fetching sessions:', error);
       toast.error('Failed to load mentorship sessions');
@@ -47,9 +40,9 @@ const MentorshipSessions: React.FC = () => {
     }
   };
 
-  const handleCancelSession = async (sessionId: number) => {
+  const handleCancelSession = async (sessionId: string) => {
     try {
-      await axios.patch(`http://localhost:5000/api/mentorship/sessions/${sessionId}`, { status: 'cancelled' });
+      await api.patch(`/mentorship/sessions/${sessionId}`, { status: 'cancelled' });
       toast.success('Session cancelled successfully');
       fetchSessions();
     } catch (error) {
@@ -58,9 +51,9 @@ const MentorshipSessions: React.FC = () => {
     }
   };
 
-  const handleCompleteSession = async (sessionId: number) => {
+  const handleCompleteSession = async (sessionId: string) => {
     try {
-      await axios.patch(`http://localhost:5000/api/mentorship/sessions/${sessionId}`, { status: 'completed' });
+      await api.patch(`/mentorship/sessions/${sessionId}`, { status: 'completed' });
       toast.success('Session marked as completed');
       fetchSessions();
     } catch (error) {
@@ -69,9 +62,9 @@ const MentorshipSessions: React.FC = () => {
     }
   };
 
-  const handleSubmitFeedback = async (sessionId: number) => {
+  const handleSubmitFeedback = async (sessionId: string) => {
     try {
-      await axios.post(`http://localhost:5000/api/mentorship/ratings`, {
+      await api.post(`/mentorship/ratings`, {
         sessionId,
         ratedId: user?.role === 'mentee' ? selectedSession?.mentorId : selectedSession?.menteeId,
         rating,
@@ -131,75 +124,85 @@ const MentorshipSessions: React.FC = () => {
 
         <div className="bg-white shadow overflow-hidden sm:rounded-md">
           <ul className="divide-y divide-gray-200">
-            {filteredSessions.map((session) => (
-              <li key={session.id}>
-                <div className="px-4 py-4 sm:px-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <div className="flex-shrink-0">
-                        <div className="h-10 w-10 rounded-full bg-primary-100 flex items-center justify-center">
-                          <span className="text-primary-600 font-medium">
+            {filteredSessions.map((session) => {
+              console.log('Session Raw Start Time:', session.startTime);
+              const sessionStartTime = new Date(session.startTime);
+              const sessionEndTime = new Date(session.endTime);
+              console.log('Session Date Object Start Time (Local):', sessionStartTime);
+              console.log('Session Date Object End Time (Local):', sessionEndTime);
+              console.log('Formatted Start Time for Display:', sessionStartTime.toLocaleTimeString());
+              console.log('Formatted End Time for Display:', sessionEndTime.toLocaleTimeString());
+
+              return (
+                <li key={session.id}>
+                  <div className="px-4 py-4 sm:px-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center">
+                        <div className="flex-shrink-0">
+                          <div className="h-10 w-10 rounded-full bg-primary-100 flex items-center justify-center">
+                            <span className="text-primary-600 font-medium">
+                              {user?.role === 'mentor'
+                                ? session.mentee.name.charAt(0)
+                                : session.mentor.name.charAt(0)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="ml-4">
+                          <h3 className="text-lg font-medium text-gray-900">
                             {user?.role === 'mentor'
-                              ? session.mentee.name.charAt(0)
-                              : session.mentor.name.charAt(0)}
-                          </span>
+                              ? `Session with ${session.mentee.name}`
+                              : `Session with ${session.mentor.name}`}
+                          </h3>
+                          <div className="mt-1">
+                            <span className="text-sm text-gray-500">
+                              {sessionStartTime.toLocaleDateString()} at{' '}
+                              {sessionStartTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} -{' '}
+                              {sessionEndTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                            </span>
+                          </div>
+                          {session.notes && (
+                            <p className="mt-1 text-sm text-gray-500">{session.notes}</p>
+                          )}
                         </div>
                       </div>
-                      <div className="ml-4">
-                        <h3 className="text-lg font-medium text-gray-900">
-                          {user?.role === 'mentor'
-                            ? `Session with ${session.mentee.name}`
-                            : `Session with ${session.mentor.name}`}
-                        </h3>
-                        <div className="mt-1">
-                          <span className="text-sm text-gray-500">
-                            {new Date(session.startTime).toLocaleDateString()} at{' '}
-                            {new Date(session.startTime).toLocaleTimeString()} -{' '}
-                            {new Date(session.endTime).toLocaleTimeString()}
-                          </span>
-                        </div>
-                        {session.notes && (
-                          <p className="mt-1 text-sm text-gray-500">{session.notes}</p>
+                      <div className="flex items-center space-x-4">
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeColor(
+                            session.status
+                          )}`}
+                        >
+                          {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
+                        </span>
+                        {session.status === 'scheduled' && (
+                          <button
+                            onClick={() => handleCancelSession(session.id)}
+                            className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        {session.status === 'scheduled' && user?.role === 'mentor' && (
+                          <button
+                            onClick={() => handleCompleteSession(session.id)}
+                            className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                          >
+                            Complete
+                          </button>
+                        )}
+                        {session.status === 'completed' && !session.rating && user?.role === 'mentee' && (
+                          <button
+                            onClick={() => setSelectedSession(session)}
+                            className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                          >
+                            Provide Feedback
+                          </button>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center space-x-4">
-                      <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeColor(
-                          session.status
-                        )}`}
-                      >
-                        {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
-                      </span>
-                      {session.status === 'scheduled' && (
-                        <button
-                          onClick={() => handleCancelSession(session.id)}
-                          className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-                        >
-                          Cancel
-                        </button>
-                      )}
-                      {session.status === 'scheduled' && user?.role === 'mentor' && (
-                        <button
-                          onClick={() => handleCompleteSession(session.id)}
-                          className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                        >
-                          Complete
-                        </button>
-                      )}
-                      {session.status === 'completed' && !session.rating && user?.role === 'mentee' && (
-                        <button
-                          onClick={() => setSelectedSession(session)}
-                          className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                        >
-                          Provide Feedback
-                        </button>
-                      )}
-                    </div>
                   </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
 
           {filteredSessions.length === 0 && (
@@ -246,13 +249,13 @@ const MentorshipSessions: React.FC = () => {
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                     value={feedback}
                     onChange={(e) => setFeedback(e.target.value)}
-                  />
+                  ></textarea>
                 </div>
-                <div className="flex justify-end space-x-3">
+                <div className="flex justify-end">
                   <button
                     type="button"
                     onClick={() => setSelectedSession(null)}
-                    className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                    className="mr-2 inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
                   >
                     Cancel
                   </button>

@@ -65,9 +65,11 @@ export const getRequests = async (
     let query = `
       SELECT mr.id, mr.status, mr.created_at as createdAt,
              mentor.id as mentorId, mentor.name as mentorName,
+             p.availability as mentorAvailability,
              mentee.id as menteeId, mentee.name as menteeName
       FROM mentorship_requests mr
       JOIN users mentor ON mr.mentor_id = mentor.id
+      JOIN profiles p ON mentor.id = p.user_id
       JOIN users mentee ON mr.mentee_id = mentee.id
       WHERE ${userRole === 'mentor' ? 'mr.mentor_id' : 'mr.mentee_id'} = ?
     `;
@@ -81,12 +83,13 @@ export const getRequests = async (
       createdAt: row.createdAt,
       mentor: {
         id: row.mentorId,
-        name: row.mentorName,
-        skills: '' // Initialize as empty string
+        name: row.mentorName || '',
+        skills: '', // Initialize as empty string
+        availability: null, // Initialize availability as null
       },
       mentee: {
         id: row.menteeId,
-        name: row.menteeName
+        name: row.menteeName || '',
       }
     }));
 
@@ -112,6 +115,11 @@ export const getRequests = async (
       requests.forEach(req => {
         if (mentorSkillsMap.has(req.mentorId)) {
           req.mentor.skills = mentorSkillsMap.get(req.mentorId)?.join(', ') || '';
+        }
+        // Also add mentorAvailability to the mentor object
+        const originalRow = (rows as any[]).find(r => r.mentorId === req.mentorId);
+        if (originalRow && originalRow.mentorAvailability) {
+          req.mentor.availability = originalRow.mentorAvailability; // Directly assign availability
         }
       });
     }
@@ -190,9 +198,15 @@ export const createSession = async (
 
     // Create session
     const sessionId = uuidv4();
+
+    // The frontend now sends startTime and endTime in YYYY-MM-DD HH:MM:SS format (local time)
+    // So, we can directly use them.
+    const formattedStartTime = startTime; // Already formatted by frontend
+    const formattedEndTime = endTime;     // Already formatted by frontend
+
     await pool.execute(
       'INSERT INTO sessions (id, request_id, start_time, end_time) VALUES (?, ?, ?, ?)',
-      [sessionId, requestId, startTime, endTime]
+      [sessionId, requestId, formattedStartTime, formattedEndTime]
     );
 
     res.status(201).json({
@@ -237,20 +251,20 @@ export const getSessions = async (
     const sessions = (rows as any[]).map(row => ({
       id: row.id,
       requestId: row.requestId,
-      startTime: row.startTime,
-      endTime: row.endTime,
+      startTime: row.startTime, // Send as is (local time string from DB)
+      endTime: row.endTime,     // Send as is (local time string from DB)
       status: row.status,
       notes: row.notes,
       mentorId: row.mentorId,
       menteeId: row.menteeId,
       mentor: {
         id: row.mentorId,
-        name: row.mentorName,
+        name: row.mentorName || '',
         // skills: '' // Skills not needed for sessions
       },
       mentee: {
         id: row.menteeId,
-        name: row.menteeName
+        name: row.menteeName || '',
       }
     }));
 
@@ -337,21 +351,17 @@ export const createRating = async (
 
     const session = sessions[0] as any;
 
-    // Check if user is authorized to rate
+    // Check if user is either mentor or mentee
     if (raterId !== session.mentor_id && raterId !== session.mentee_id) {
-      throw new AppError('Unauthorized to rate this session', 403);
-    }
-
-    // Check if rated user is the other participant
-    if (ratedId !== session.mentor_id && ratedId !== session.mentee_id) {
-      throw new AppError('Invalid rated user', 400);
+      throw new AppError('Unauthorized', 403);
     }
 
     // Create rating
     const ratingId = uuidv4();
+
     await pool.execute(
       'INSERT INTO ratings (id, session_id, rater_id, rated_id, rating, comment) VALUES (?, ?, ?, ?, ?, ?)',
-      [ratingId, sessionId, raterId, ratedId, rating, comment || null]
+      [ratingId, sessionId, raterId, ratedId, rating, comment]
     );
 
     res.status(201).json({
@@ -370,4 +380,38 @@ export const createRating = async (
   } catch (error) {
     next(error);
   }
-}; 
+};
+
+export const deleteRequest = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { requestId } = req.params;
+    const userId = (req as any).user.id;
+
+    // Check if request exists and if the user is the mentee who sent it
+    const [requests] = await pool.execute(
+      'SELECT * FROM mentorship_requests WHERE id = ? AND mentee_id = ?',
+      [requestId, userId]
+    );
+
+    if (!Array.isArray(requests) || requests.length === 0) {
+      throw new AppError('Request not found or unauthorized', 404);
+    }
+
+    // Delete the request
+    await pool.execute(
+      'DELETE FROM mentorship_requests WHERE id = ?',
+      [requestId]
+    );
+
+    res.status(204).json({
+      status: 'success',
+      message: 'Mentorship request cancelled successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+};

@@ -12,6 +12,7 @@ interface User extends RowDataPacket {
   email: string;
   password_hash: string;
   role: 'mentor' | 'mentee';
+  name: string;
 }
 
 export const register = async (
@@ -30,6 +31,12 @@ export const register = async (
       body('role')
         .isIn(['mentor', 'mentee'])
         .withMessage('Role must be either mentor or mentee')
+        .run(req),
+      body('name')
+        .notEmpty()
+        .withMessage('Name is required')
+        .isLength({ min: 2 })
+        .withMessage('Name must be at least 2 characters long')
         .run(req)
     ]);
 
@@ -38,7 +45,7 @@ export const register = async (
       throw new AppError(errors.array()[0].msg, 400);
     }
 
-    const { email, password, role } = req.body;
+    const { email, password, role, name } = req.body;
 
     // Check if user already exists
     const [existingUsers] = await pool.execute<RowDataPacket[]>(
@@ -57,8 +64,8 @@ export const register = async (
     // Create user
     const userId = uuidv4();
     await pool.execute(
-      'INSERT INTO users (id, email, password_hash, role) VALUES (?, ?, ?, ?)',
-      [userId, email, hashedPassword, role]
+      'INSERT INTO users (id, email, password_hash, role, name) VALUES (?, ?, ?, ?, ?)',
+      [userId, email, hashedPassword, role, name]
     );
 
     // Generate JWT
@@ -79,7 +86,8 @@ export const register = async (
         user: {
           id: userId,
           email,
-          role
+          role,
+          name
         }
       }
     });
@@ -136,17 +144,21 @@ export const login = async (
       jwtOptions
     );
 
-    res.json({
+    const responseData = {
       status: 'success',
       data: {
         token,
         user: {
           id: user.id,
           email: user.email,
-          role: user.role
+          role: user.role,
+          name: user.name
         }
       }
-    });
+    };
+
+    console.log('Backend Login: Sending response data:', responseData);
+    res.json(responseData);
   } catch (error) {
     next(error);
   }
