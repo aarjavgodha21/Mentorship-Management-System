@@ -4,7 +4,8 @@ import {
   createProfile,
   getProfile,
   updateProfile,
-  searchMentors
+  searchMentors,
+  getAllSkills
 } from '../controllers/profile';
 import { validateRequest } from '../middleware/validateRequest';
 import { authenticate } from '../middleware/auth';
@@ -29,6 +30,9 @@ router.post(
   validateRequest,
   createProfile
 );
+
+// Get all available skills (define before :userId to avoid conflicts)
+router.get('/skills', authenticate, getAllSkills);
 
 // Get profile
 router.get('/:userId', authenticate, getProfile);

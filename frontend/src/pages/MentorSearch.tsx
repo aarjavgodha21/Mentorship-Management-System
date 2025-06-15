@@ -4,20 +4,59 @@ import { toast } from 'react-toastify';
 import { useAuth } from '../contexts/AuthContext';
 import MentorSelection from '../components/MentorSelection';
 import { MentorProfile, Session } from '../types';
+import Select from 'react-select';
 
 const MentorSearch: React.FC = () => {
   const { user } = useAuth();
-  const [searchSkill, setSearchSkill] = useState('');
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [searchDepartment, setSearchDepartment] = useState('');
   const [searchResults, setSearchResults] = useState<MentorProfile[]>([]);
   const [loading, setLoading] = useState(false);
+  const [availableSkills, setAvailableSkills] = useState<string[]>([]);
+
+  React.useEffect(() => {
+    // Fetch available skills when component mounts
+    const fetchSkills = async () => {
+      try {
+        console.log('Fetching skills from /profile/skills');
+        const response = await api.get('/profile/skills');
+        console.log('Skills response:', response.data);
+        
+        if (!response.data?.data?.skills) {
+          console.error('Invalid skills response format:', response.data);
+          toast.error('Invalid response format from server');
+          return;
+        }
+
+        const skills = response.data.data.skills.map((skill: any) => {
+          if (!skill.name) {
+            console.warn('Skill missing name:', skill);
+            return null;
+          }
+          return skill.name;
+        }).filter(Boolean);
+
+        console.log('Processed skills:', skills);
+        setAvailableSkills(skills);
+      } catch (error: any) {
+        console.error('Error fetching skills:', error);
+        console.error('Error details:', {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status
+        });
+        toast.error(error.response?.data?.message || 'Failed to load available skills');
+      }
+    };
+    fetchSkills();
+  }, []);
 
   const handleSearch = async () => {
     setLoading(true);
     try {
       const response = await api.get('/profile/search/mentors', {
         params: {
-          skill: searchSkill,
+          skills: selectedSkills,
           department: searchDepartment,
         },
       });
@@ -76,14 +115,113 @@ const MentorSearch: React.FC = () => {
           <h2 className="text-xl font-medium text-gray-900 mb-4">Search Filters</h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div>
-              <label htmlFor="skill" className="block text-sm font-medium text-gray-700">Skill</label>
-              <input
-                type="text"
-                id="skill"
-                className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
-                value={searchSkill}
-                onChange={(e) => setSearchSkill(e.target.value)}
-                placeholder="e.g., React, Python"
+              <label htmlFor="skills" className="block text-sm font-medium text-gray-700">Skills</label>
+              <Select
+                isMulti
+                id="skills"
+                options={availableSkills.map(skill => ({ value: skill, label: skill }))}
+                value={selectedSkills.map(skill => ({ value: skill, label: skill }))}
+                onChange={(selected) => setSelectedSkills(selected ? selected.map(option => option.value) : [])}
+                className="mt-1"
+                placeholder="Select skills..."
+                menuPortalTarget={document.body}
+                styles={{
+                  control: (base, state) => ({
+                    ...base,
+                    minHeight: '38px',
+                    fontSize: '1rem',
+                    borderColor: state.isFocused ? '#3B82F6' : '#D1D5DB',
+                    boxShadow: state.isFocused ? '0 0 0 1px #3B82F6' : 'none',
+                    '&:hover': {
+                      borderColor: state.isFocused ? '#3B82F6' : '#9CA3AF',
+                    },
+                    padding: '0 12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    boxSizing: 'border-box',
+                    cursor: 'text',
+                  }),
+                  valueContainer: (base) => ({
+                    ...base,
+                    padding: '4px 0',
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    flex: 1,
+                    overflow: 'hidden',
+                    height: '100%',
+                    boxSizing: 'border-box',
+                    minHeight: 'auto',
+                  }),
+                  placeholder: (base) => ({
+                    ...base,
+                    color: '#6B7280',
+                    fontSize: '1rem',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    margin: '0',
+                    padding: '0',
+                    lineHeight: '1.5',
+                  }),
+                  input: (base) => ({
+                    ...base,
+                    margin: '0',
+                    padding: '0',
+                    height: 'auto',
+                    lineHeight: '1.5',
+                    flex: 1,
+                    minWidth: '75px',
+                    minHeight: '24px',
+                  }),
+                  option: (base, { isFocused, isSelected }) => ({
+                    ...base,
+                    fontSize: '1rem',
+                    padding: '10px 12px',
+                    backgroundColor: isSelected
+                      ? '#3B82F6'
+                      : isFocused
+                      ? '#EFF6FF'
+                      : null,
+                    color: isSelected
+                      ? 'white'
+                      : '#1F2937',
+                    cursor: 'pointer',
+                  }),
+                  multiValue: (base) => ({
+                    ...base,
+                    backgroundColor: '#DBEAFE',
+                    color: '#1E40AF',
+                    borderRadius: '9999px',
+                    padding: '4px 8px',
+                    margin: '2px',
+                    fontSize: '0.9rem',
+                    lineHeight: '1.2',
+                  }),
+                  multiValueLabel: (base) => ({
+                    ...base,
+                    color: '#1E40AF',
+                    padding: '0 4px',
+                  }),
+                  multiValueRemove: (base) => ({
+                    ...base,
+                    color: '#1E40AF',
+                    '&:hover': {
+                      backgroundColor: '#BFDBFE',
+                      color: '#1E40AF',
+                    },
+                  }),
+                  menuList: (base) => ({
+                    ...base,
+                    maxHeight: '200px',
+                    overflowY: 'auto',
+                    padding: '0',
+                  }),
+                  menuPortal: (base) => ({
+                    ...base,
+                    zIndex: 9999,
+                  }),
+                }}
               />
             </div>
             <div>

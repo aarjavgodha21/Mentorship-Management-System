@@ -23,8 +23,16 @@ const PasswordInput = <T extends FieldValues>({
   watch,
   disabled = false
 }: PasswordInputProps<T>) => {
+  const { ref, ...rest } = register(name, {
+    required: 'Password is required',
+    minLength: {
+      value: 8,
+      message: 'Password must be at least 8 characters'
+    }
+  });
+
   const [showPassword, setShowPassword] = useState(false);
-  const password = watch ? watch(name) : '';
+  const password = watch ? watch(name) || '' : '';
 
   const getPasswordStrength = (currentPassword: string) => {
     let score = 0;
@@ -36,8 +44,8 @@ const PasswordInput = <T extends FieldValues>({
   };
 
   const strength = getPasswordStrength(password);
-  const strengthColors = ['bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-green-500'];
-  const strengthText = ['Very Weak', 'Weak', 'Medium', 'Strong'];
+  const strengthColors = ['bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-green-500', 'bg-green-500'];
+  const strengthText = ['Very Weak', 'Weak', 'Medium', 'Strong', 'Strong'];
 
   return (
     <div>
@@ -46,13 +54,8 @@ const PasswordInput = <T extends FieldValues>({
       </label>
       <div className="mt-1 relative">
         <input
-          {...register(name, {
-            required: 'Password is required',
-            minLength: {
-              value: 8,
-              message: 'Password must be at least 8 characters'
-            }
-          })}
+          ref={ref}
+          {...rest}
           type={showPassword ? 'text' : 'password'}
           className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
           placeholder={placeholder}
@@ -81,13 +84,13 @@ const PasswordInput = <T extends FieldValues>({
               <div
                 key={i}
                 className={`h-1 w-full rounded-full ${
-                  i < strength ? strengthColors[strength - 1] : 'bg-gray-200'
+                  i < strength ? strengthColors[strength] : 'bg-gray-200'
                 }`}
               />
             ))}
           </div>
-          <p className={`mt-1 text-sm ${strengthColors[strength - 1].replace('bg-', 'text-')}`}>
-            {strengthText[strength - 1]}
+          <p className={`mt-1 text-sm ${strengthColors[strength].replace('bg-', 'text-')}`}>
+            {strengthText[strength]}
           </p>
         </div>
       )}

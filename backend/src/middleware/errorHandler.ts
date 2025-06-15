@@ -21,6 +21,13 @@ export const errorHandler = (
   res: Response,
   next: NextFunction
 ) => {
+  console.error('Error details:', {
+    name: err.name,
+    message: err.message,
+    stack: err.stack,
+    ...(err instanceof AppError ? { statusCode: err.statusCode } : {})
+  });
+
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({
       status: err.status,
@@ -28,10 +35,24 @@ export const errorHandler = (
     });
   }
 
-  // Programming or other unknown error
-  console.error('ERROR 💥', err);
+  // Handle MySQL errors
+  if (err.name === 'Error' && (err as any).code) {
+    console.error('MySQL Error:', {
+      code: (err as any).code,
+      errno: (err as any).errno,
+      sqlMessage: (err as any).sqlMessage,
+      sqlState: (err as any).sqlState
+    });
+
+    return res.status(500).json({
+      status: 'error',
+      message: 'Database error occurred'
+    });
+  }
+
+  // Default error
   return res.status(500).json({
     status: 'error',
-    message: 'Something went wrong!'
+    message: 'Something went wrong'
   });
 }; 

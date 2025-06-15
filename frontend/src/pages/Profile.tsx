@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-toastify';
@@ -24,13 +24,28 @@ const Profile: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isEditingName, setIsEditingName] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false); // New state for profile edit mode
+  const [profileExists, setProfileExists] = useState(false); // New state to track if profile exists
+  const isFetchingProfileRef = useRef(false); // Use useRef for mutable value not causing re-renders when changed
+  
+  // Log the current editing state for debugging
+  useEffect(() => {
+    console.log('isEditingProfile:', isEditingProfile);
+  }, [isEditingProfile]);
+
   const [profileData, setProfileData] = useState<ProfileFormData>({
     department: '',
     bio: '',
     skills: '',
     experience: '',
-    availability: null // Initialize as null or empty object matching structure
+    availability: null
   });
+  const profileDataRef = useRef(profileData);
+  
+  // Update ref when profileData changes
+  useEffect(() => {
+    profileDataRef.current = profileData;
+  }, [profileData]);
+
   // New state variables for availability inputs
   const [availableDays, setAvailableDays] = useState<string[]>([]);
   const [availableStartTime, setAvailableStartTime] = useState<string>('');
@@ -51,19 +66,53 @@ const Profile: React.FC = () => {
   } = useForm<NameFormData>();
 
   const fetchProfile = useCallback(async () => {
+    if (isFetchingProfileRef.current) {
+      console.log('Profile.tsx: Already fetching profile, skipping duplicate request');
+      return;
+    }
+    isFetchingProfileRef.current = true;
+    setLoading(true);
     try {
       if (!user || !user.id) {
         console.warn('Profile.tsx: User or User ID not available for fetching profile.');
-        setLoading(false);
+        setProfileData({
+          department: '', bio: '', skills: '', experience: '', availability: null,
+        });
+        resetProfile({
+          department: '', bio: '', skills: '', experience: '', availability: null,
+        });
+        setIsEditingProfile(false);
+        setProfileExists(false); // No user, so no profile
         return;
       }
+
+      console.log('Profile.tsx: Fetching profile for user:', user.id);
       const response = await fetch(`http://localhost:5000/api/profile/${user.id}`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`
         }
       });
-      if (!response.ok) throw new Error('Failed to fetch profile');
+
+      if (!response.ok) {
+        console.warn(`Profile.tsx: Failed to fetch profile (${response.status}). Current profile data:`, profileDataRef.current);
+        // Only reset if we don't have any data yet
+        if (!profileDataRef.current.department && !profileDataRef.current.bio && !profileDataRef.current.skills && !profileDataRef.current.experience) {
+          console.log('Profile.tsx: No existing profile data, initializing empty profile');
+          setProfileData({
+            department: '', bio: '', skills: '', experience: '', availability: null,
+          });
+          resetProfile({
+            department: '', bio: '', skills: '', experience: '', availability: null,
+          });
+        } else {
+          console.log('Profile.tsx: Keeping existing profile data');
+        }
+        setProfileExists(false); // Profile not found or error
+        return;
+      }
+
       const responseData = await response.json();
+      console.log('Profile.tsx: Received profile data:', responseData);
       const profileBackend = responseData.data.profile;
 
       // Transform skills array to comma-separated string for the form
@@ -71,12 +120,9 @@ const Profile: React.FC = () => {
         ? profileBackend.skills.map((skill: any) => skill.name).join(', ')
         : '';
 
-      // Ensure availability is always a string for display
       let parsedAvailability = null;
-      console.log('Profile.tsx - Availability Debug: Raw availability from backend:', profileBackend.availability);
       if (profileBackend.availability) {
         parsedAvailability = profileBackend.availability;
-        console.log('Profile.tsx - Availability Debug: Used raw availability directly as object:', parsedAvailability);
       }
 
       setAvailableDays(parsedAvailability?.days || []);
@@ -88,27 +134,31 @@ const Profile: React.FC = () => {
         bio: profileBackend.bio || '',
         skills: skillsString,
         experience: profileBackend.experience || '',
-        availability: parsedAvailability, // Directly use the parsed object
+        availability: parsedAvailability,
       };
 
+      console.log('Profile.tsx: Setting new profile data:', transformedProfileData);
       setProfileData(transformedProfileData);
       resetProfile(transformedProfileData);
-      setIsEditingProfile(false); // Start in view mode
+      setIsEditingProfile(false);
+      setProfileExists(true); // Profile successfully fetched
     } catch (error) {
-      toast.error('Failed to load profile');
-      console.error('Error fetching profile:', error);
+      console.error('Profile.tsx: Error fetching profile:', error);
+      setProfileExists(false); // Error, so assume profile doesn't exist or is inaccessible
     } finally {
       setLoading(false);
+      isFetchingProfileRef.current = false;
     }
-  }, [user, resetProfile]); // Add user and resetProfile to dependencies
+  }, [user, resetProfile]);
 
   useEffect(() => {
+    console.log('useEffect triggered. User:', user);
     if (user) {
       fetchProfile();
     } else {
       setLoading(false);
     }
-  }, [user, fetchProfile]); // Add fetchProfile to dependencies
+  }, [user, fetchProfile]);
 
   const onProfileSubmit = async (formData: ProfileFormData) => {
     try {
@@ -144,8 +194,11 @@ const Profile: React.FC = () => {
         // hourlyRate is optional and not directly on the form, so omit if not present or handled
       };
 
-      const response = await fetch('http://localhost:5000/api/profile', {
-        method: 'PATCH',
+      const method = profileExists ? 'PATCH' : 'POST'; // Choose method based on profileExists
+      const url = 'http://localhost:5000/api/profile';
+
+      const response = await fetch(url, {
+        method,
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -155,9 +208,9 @@ const Profile: React.FC = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to update profile');
+        throw new Error(errorData.message || `Failed to ${profileExists ? 'update' : 'create'} profile`);
       }
-      toast.success('Profile updated successfully');
+      toast.success(`Profile ${profileExists ? 'updated' : 'created'} successfully`);
       await refreshUser();
       await fetchProfile(); // Re-fetch profile data to update display
       setIsEditingProfile(false); // Switch back to view mode after saving
@@ -282,118 +335,111 @@ const Profile: React.FC = () => {
               {isEditingProfile ? (
                 <form onSubmit={handleProfileSubmit(onProfileSubmit)} className="space-y-4">
                   <div>
-                    <label htmlFor="department" className="block text-sm font-medium text-gray-700">Department</label>
+                    <label htmlFor="department" className="block text-sm font-medium text-gray-700">
+                      Department
+                    </label>
                     <input
-                      type="text"
-                      id="department"
                       {...registerProfile('department')}
-                      defaultValue={profileData.department}
-                      className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
-                      readOnly={!isEditingProfile}
-                    />
-                  </div>
-
-                  <div>
-                    <label htmlFor="bio" className="block text-sm font-medium text-gray-700">Bio</label>
-                    <textarea
-                      id="bio"
-                      rows={3}
-                      {...registerProfile('bio')}
-                      defaultValue={profileData.bio}
-                      className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
-                      readOnly={!isEditingProfile}
-                    ></textarea>
-                  </div>
-
-                  <div>
-                    <label htmlFor="skills" className="block text-sm font-medium text-gray-700">Skills (comma-separated)</label>
-                    <input
                       type="text"
-                      id="skills"
-                      {...registerProfile('skills')}
-                      defaultValue={profileData.skills}
-                      className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
-                      readOnly={!isEditingProfile}
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                      placeholder="Your Department"
+                      defaultValue={profileData.department}
                     />
                   </div>
-
                   <div>
-                    <label htmlFor="experience" className="block text-sm font-medium text-gray-700">Experience</label>
+                    <label htmlFor="bio" className="block text-sm font-medium text-gray-700">
+                      Bio
+                    </label>
                     <textarea
-                      id="experience"
+                      {...registerProfile('bio')}
                       rows={3}
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                      placeholder="Tell us about yourself..."
+                      defaultValue={profileData.bio}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="skills" className="block text-sm font-medium text-gray-700">
+                      Skills (comma-separated)
+                    </label>
+                    <input
+                      {...registerProfile('skills')}
+                      type="text"
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                      placeholder="e.g., React, Node.js, Project Management"
+                      defaultValue={profileData.skills}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="experience" className="block text-sm font-medium text-gray-700">
+                      Experience
+                    </label>
+                    <textarea
                       {...registerProfile('experience')}
+                      rows={3}
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                      placeholder="Your professional experience..."
                       defaultValue={profileData.experience}
-                      className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
-                      readOnly={!isEditingProfile}
-                    ></textarea>
+                    />
                   </div>
-
-                  {/* Availability - New Fields */}
-                  <div className="space-y-4">
-                    <h4 className="text-md font-medium text-gray-900">Set Your Availability</h4>
+                  {user?.role === 'mentor' && (
                     <div>
-                      <label htmlFor="availableDays" className="block text-sm font-medium text-gray-700">Available Days</label>
-                      <select
-                        id="availableDays"
-                        multiple={true}
-                        value={availableDays}
-                        onChange={(e) => setAvailableDays(Array.from(e.target.selectedOptions, option => option.value))}
-                        className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
-                        disabled={!isEditingProfile}
-                      >
-                        {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map(day => (
-                          <option key={day} value={day}>{day}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label htmlFor="availableStartTime" className="block text-sm font-medium text-gray-700">Start Time</label>
-                      <input
-                        type="time"
-                        id="availableStartTime"
-                        value={availableStartTime}
-                        onChange={(e) => setAvailableStartTime(e.target.value)}
-                        className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
-                        readOnly={!isEditingProfile}
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="availableEndTime" className="block text-sm font-medium text-gray-700">End Time</label>
-                      <input
-                        type="time"
-                        id="availableEndTime"
-                        value={availableEndTime}
-                        onChange={(e) => setAvailableEndTime(e.target.value)}
-                        className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
-                        readOnly={!isEditingProfile}
-                      />
-                    </div>
-                  </div>
-
-                  {isEditingProfile && (
-                    <div className="mt-6 flex space-x-3">
-                      <button
-                        type="submit"
-                        className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                      >
-                        Save Changes
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsEditingProfile(false);
-                          resetProfile(profileData); // Reset form to current profile data on cancel
-                          setAvailableDays(profileData.availability?.days || []);
-                          setAvailableStartTime(profileData.availability?.startTime || '');
-                          setAvailableEndTime(profileData.availability?.endTime || '');
-                        }}
-                        className="inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                      >
-                        Cancel
-                      </button>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Availability
+                      </label>
+                      <div className="grid grid-cols-2 gap-4">
+                        <select
+                          multiple
+                          value={availableDays}
+                          onChange={(e) => setAvailableDays(Array.from(e.target.selectedOptions, option => option.value))}
+                          className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                        >
+                          <option value="Monday">Monday</option>
+                          <option value="Tuesday">Tuesday</option>
+                          <option value="Wednesday">Wednesday</option>
+                          <option value="Thursday">Thursday</option>
+                          <option value="Friday">Friday</option>
+                          <option value="Saturday">Saturday</option>
+                          <option value="Sunday">Sunday</option>
+                        </select>
+                        <div className="flex space-x-2">
+                          <input
+                            type="time"
+                            value={availableStartTime}
+                            onChange={(e) => setAvailableStartTime(e.target.value)}
+                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                          />
+                          <input
+                            type="time"
+                            value={availableEndTime}
+                            onChange={(e) => setAvailableEndTime(e.target.value)}
+                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                          />
+                        </div>
+                      </div>
                     </div>
                   )}
+                  <div className="flex space-x-3">
+                    <button
+                      type="submit"
+                      className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingProfile(false);
+                        resetProfile(profileData); // Reset form to current profile data
+                        setAvailableDays(profileData.availability?.days || []);
+                        setAvailableStartTime(profileData.availability?.startTime || '');
+                        setAvailableEndTime(profileData.availability?.endTime || '');
+                      }}
+                      className="inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </form>
               ) : (
                 <div className="space-y-4">
@@ -413,35 +459,38 @@ const Profile: React.FC = () => {
                     <h4 className="text-md font-medium text-gray-900">Experience:</h4>
                     <p className="text-gray-700">{profileData.experience}</p>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-md font-medium text-gray-900">Availability:</h4>
-                    <div className="text-gray-700">
-                      {(() => {
-                        console.log('Profile.tsx - Availability Display Debug: profileData.availability', profileData.availability);
-                        if (profileData.availability) {
-                          console.log('Profile.tsx - Availability Display Debug: profileData.availability.days', profileData.availability.days);
-                          return (
-                            <>
-                              <p>Days: {Array.isArray(profileData.availability.days) && profileData.availability.days.length > 0
-                                ? profileData.availability.days.join(', ')
-                                : 'Not specified'}
-                              </p>
-                              <p>Time: {profileData.availability.startTime && profileData.availability.endTime
-                                ? `${profileData.availability.startTime} - ${profileData.availability.endTime}`
-                                : 'Not specified'}
-                              </p>
-                            </>
-                          );
-                        } else {
-                          return <p>Not available</p>;
-                        }
-                      })()}
+                  {user?.role === 'mentor' && (
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-md font-medium text-gray-900">Availability:</h4>
+                      <div className="text-gray-700">
+                        {(() => {
+                          if (profileData.availability) {
+                            return (
+                              <>
+                                <p>Days: {Array.isArray(profileData.availability.days) && profileData.availability.days.length > 0
+                                  ? profileData.availability.days.join(', ')
+                                  : 'Not specified'}
+                                </p>
+                                <p>Time: {profileData.availability.startTime && profileData.availability.endTime
+                                  ? `${profileData.availability.startTime} - ${profileData.availability.endTime}`
+                                  : 'Not specified'}
+                                </p>
+                              </>
+                            );
+                          } else {
+                            return <p>Not available</p>;
+                          }
+                        })()}
+                      </div>
                     </div>
-                  </div>
+                  )}
                   <div className="mt-6">
                     <button
                       type="button"
-                      onClick={() => setIsEditingProfile(true)}
+                      onClick={() => {
+                        console.log('Edit Profile button clicked. Setting isEditingProfile to true.');
+                        setIsEditingProfile(true);
+                      }}
                       className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
                     >
                       Edit Profile

@@ -273,8 +273,8 @@ export const searchMentors = async (
   next: NextFunction
 ) => {
   try {
-    const { skill, department, rating } = req.query;
-    console.log('searchMentors: Received search query:', { skill, department, rating });
+    const { skills, department, rating } = req.query;
+    console.log('searchMentors: Received search query:', { skills, department, rating });
 
     let query = `
       SELECT DISTINCT p.*, u.id as user_id
@@ -287,9 +287,11 @@ export const searchMentors = async (
 
     const queryParams = [];
 
-    if (skill) {
-      query += ' AND s.name LIKE ?';
-      queryParams.push(`%${skill}%`);
+    if (skills) {
+      const skillArray = Array.isArray(skills) ? skills : [skills];
+      const skillConditions = skillArray.map(() => 'EXISTS (SELECT 1 FROM user_skills us2 JOIN skills s2 ON us2.skill_id = s2.id WHERE us2.user_id = u.id AND s2.name LIKE ?)');
+      query += ` AND ${skillConditions.join(' AND ')}`;
+      queryParams.push(...skillArray.map(skill => `%${skill}%`));
     }
 
     if (department) {
@@ -340,6 +342,38 @@ export const searchMentors = async (
       }
     });
   } catch (error) {
+    next(error);
+  }
+};
+
+export const getAllSkills = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    console.log('getAllSkills: Fetching all skills');
+    const [skills] = await pool.execute(
+      'SELECT DISTINCT name FROM skills ORDER BY name'
+    );
+
+    console.log('getAllSkills: Skills found:', skills);
+
+    // Ensure we're sending the correct format
+    const formattedSkills = Array.isArray(skills) ? skills.map(skill => ({
+      name: (skill as any).name
+    })) : [];
+
+    console.log('getAllSkills: Formatted skills:', formattedSkills);
+
+    res.json({
+      status: 'success',
+      data: {
+        skills: formattedSkills
+      }
+    });
+  } catch (error) {
+    console.error('getAllSkills: Error fetching skills:', error);
     next(error);
   }
 }; 
